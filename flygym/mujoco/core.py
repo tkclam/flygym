@@ -35,6 +35,7 @@ import flygym.mujoco.preprogrammed as preprogrammed
 import flygym.mujoco.state as state
 import flygym.mujoco.vision as vision
 from flygym.mujoco.arena import BaseArena, FlatTerrain
+from flygym.mujoco.render import VideoRenderer
 from flygym.common import get_data_path
 
 
@@ -238,8 +239,10 @@ class NeuroMechFly(gym.Env):
     physics: dm_control.mjcf.Physics
         The MuJoCo Physics object built from the arena's MJCF model with
         the fly in it.
-    curr_time : float
+    current_time : float
         The (simulated) time elapsed since the last reset (in seconds).
+    current_observation : gymnasium.core.ObsType
+        The current observation of the simulation.
     action_space : gymnasium.core.ObsType
         Definition of the simulation's action space as a Gym environment.
     observation_space : gymnasium.core.ObsType
@@ -349,6 +352,7 @@ class NeuroMechFly(gym.Env):
         self._last_tarsalseg_names = [
             f"{side}{pos}Tarsus5" for side in "LR" for pos in "FMH"
         ]
+        self.current_observation = None
 
         if self.sim_params.draw_contacts and "cv2" not in sys.modules:
             logging.warning(
@@ -503,27 +507,19 @@ class NeuroMechFly(gym.Env):
         self._set_init_pose(self.init_pose)
 
         # Set up a few things for rendering
-        self.curr_time = 0
-        self._last_render_time = -np.inf
-        if sim_params.render_mode != "headless":
-            self._eff_render_interval = (
-                sim_params.render_playspeed / self.sim_params.render_fps
-            )
-        self._frames = []
-
-        if self.sim_params.draw_contacts:
-            self._last_contact_force = []
-            self._last_contact_pos = []
-
-        if self.sim_params.draw_contacts or self.sim_params.draw_gravity:
-            width, height = self.sim_params.render_window_size
-            self._dm_camera = dm_control.mujoco.Camera(
-                self.physics,
-                camera_id=self.sim_params.render_camera,
-                width=width,
-                height=height,
-            )
-            self._decompose_colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255]]
+        self.current_time = 0
+        self.video_renderer = VideoRenderer(
+            window_size=self.sim_params.render_window_size,
+            playspeed=self.sim_params.render_playspeed,
+            fps=self.sim_params.render_fps,
+            add_timestamp_text=self.sim_params.render_timestamp_text,
+            add_playspeed_text=self.sim_params.render_playspeed_text,
+            draw_contact_force=self.sim_params.draw_contacts,
+            contact_force_arrow_scaling=self.sim_params.force_arrow_scaling,
+            draw_gravity=self.sim_params.draw_gravity,
+            gravity_arrow_scaling=self.sim_params.gravity_arrow_scaling,
+            tip_length=self.sim_params.tip_length,
+        )
 
         # flip detection
         self._flip_counter = 0
@@ -1200,7 +1196,7 @@ class NeuroMechFly(gym.Env):
             self._set_gravity(self.sim_params.gravity)
             if self.sim_params.align_camera_with_gravity:
                 self._camera_rot = np.eye(3)
-        self.curr_time = 0
+        self.current_time = 0
         self._set_init_pose(self.init_pose)
         self._frames = []
         self._last_render_time = -np.inf
@@ -1209,7 +1205,8 @@ class NeuroMechFly(gym.Env):
         self._curr_visual_input = None
         self._vision_update_mask = []
         self._flip_counter = 0
-        return self.get_observation(), self.get_info()
+        obs = self._update_observation()
+        return obs, self.get_info()
 
     def step(
         self, action: ObsType
@@ -1246,8 +1243,8 @@ class NeuroMechFly(gym.Env):
             self._last_adhesion = action["adhesion"]
 
         self.physics.step()
-        self.curr_time += self.timestep
-        observation = self.get_observation()
+        self.current_time += self.timestep
+        observation = self._update_observation()
         reward = self.get_reward()
         terminated = self.is_terminated()
         truncated = self.is_truncated()
@@ -1259,7 +1256,7 @@ class NeuroMechFly(gym.Env):
             else:
                 self._flip_counter = 0
             flip_config = self._mujoco_config["flip_detection"]
-            has_passed_init = self.curr_time > flip_config["ignore_period"]
+            has_passed_init = self.current_time > flip_config["ignore_period"]
             contact_lost_time = self._flip_counter * self.timestep
             lost_contact_long_enough = contact_lost_time > flip_config["flip_threshold"]
             info["flip"] = has_passed_init and lost_contact_long_enough
@@ -1280,51 +1277,55 @@ class NeuroMechFly(gym.Env):
         """
         if self.render_mode == "headless":
             return None
-        if self.curr_time < len(self._frames) * self._eff_render_interval:
+        if self.current_time < len(self._frames) * self._eff_render_interval:
             return None
         if self.render_mode == "saved":
-            width, height = self.sim_params.render_window_size
-            camera = self.sim_params.render_camera
-            if self.update_camera_pos:
-                self._update_cam_pos()
-            if self.sim_params.camera_follows_fly_orientation:
-                self._update_cam_rot()
-            if self.sim_params.draw_adhesion:
-                self._draw_adhesion()
-            if self.sim_params.align_camera_with_gravity:
-                self._rotate_camera()
-            img = self.physics.render(width=width, height=height, camera_id=camera)
-            img = img.copy()
-            if self.sim_params.draw_contacts:
-                img = self._draw_contacts(img)
-            if self.sim_params.draw_gravity:
-                img = self._draw_gravity(img)
+            if self.video_renderer.need_new_frame(self.current_time):
+                self.video_renderer.add_frame()
+            else:
+                return None
+            # width, height = self.sim_params.render_window_size
+            # camera = self.sim_params.render_camera
+            # if self.update_camera_pos:
+            #     self._update_cam_pos()
+            # if self.sim_params.camera_follows_fly_orientation:
+            #     self._update_cam_rot()
+            # if self.sim_params.draw_adhesion:
+            #     self._draw_adhesion()
+            # if self.sim_params.align_camera_with_gravity:
+            #     self._rotate_camera()
+            # img = self.physics.render(width=width, height=height, camera_id=camera)
+            # img = img.copy()
+            # if self.sim_params.draw_contacts:
+            #     img = self._draw_contacts(img)
+            # if self.sim_params.draw_gravity:
+            #     img = self._draw_gravity(img)
 
-            render_playspeed_text = self.sim_params.render_playspeed_text
-            render_time_text = self.sim_params.render_timestamp_text
-            if render_playspeed_text or render_time_text:
-                if render_playspeed_text and render_time_text:
-                    text = (
-                        f"{self.curr_time:.2f}s ({self.sim_params.render_playspeed}x)"
-                    )
-                elif render_playspeed_text:
-                    text = f"{self.sim_params.render_playspeed}x"
-                elif render_time_text:
-                    text = f"{self.curr_time:.2f}s"
-                img = cv2.putText(
-                    img,
-                    text,
-                    org=(20, 30),
-                    fontFace=cv2.FONT_HERSHEY_DUPLEX,
-                    fontScale=0.8,
-                    color=(0, 0, 0),
-                    lineType=cv2.LINE_AA,
-                    thickness=1,
-                )
+            # render_playspeed_text = self.sim_params.render_playspeed_text
+            # render_time_text = self.sim_params.render_timestamp_text
+            # if render_playspeed_text or render_time_text:
+            #     if render_playspeed_text and render_time_text:
+            #         text = (
+            #             f"{self.curr_time:.2f}s ({self.sim_params.render_playspeed}x)"
+            #         )
+            #     elif render_playspeed_text:
+            #         text = f"{self.sim_params.render_playspeed}x"
+            #     elif render_time_text:
+            #         text = f"{self.curr_time:.2f}s"
+            #     img = cv2.putText(
+            #         img,
+            #         text,
+            #         org=(20, 30),
+            #         fontFace=cv2.FONT_HERSHEY_DUPLEX,
+            #         fontScale=0.8,
+            #         color=(0, 0, 0),
+            #         lineType=cv2.LINE_AA,
+            #         thickness=1,
+            #     )
 
-            self._frames.append(img)
-            self._last_render_time = self.curr_time
-            return self._frames[-1]
+            # self._frames.append(img)
+            # self._last_render_time = self.curr_time
+            # return self._frames[-1]
         else:
             raise NotImplementedError
 
@@ -1519,7 +1520,7 @@ class NeuroMechFly(gym.Env):
             self._last_vision_update_time + self._eff_visual_render_interval
         )
         # avoid floating point errors: when too close, update anyway
-        if self.curr_time + 0.5 * self.timestep < next_render_time:
+        if self.current_time + 0.5 * self.timestep < next_render_time:
             self._vision_update_mask.append(False)
             return
         self._vision_update_mask.append(True)
@@ -1544,7 +1545,7 @@ class NeuroMechFly(gym.Env):
         self._curr_visual_input = np.array(ommatidia_readouts)
         if self.sim_params.render_raw_vision:
             self._curr_raw_visual_input = np.array(raw_visual_input)
-        self._last_vision_update_time = self.curr_time
+        self._last_vision_update_time = self.current_time
 
     def change_segment_color(self, segment, color):
         """Change the color of a segment of the fly.
@@ -1570,14 +1571,7 @@ class NeuroMechFly(gym.Env):
         """
         return np.array(self._vision_update_mask)
 
-    def get_observation(self) -> Tuple[ObsType, Dict[str, Any]]:
-        """Get observation without stepping the physics simulation.
-
-        Returns
-        -------
-        ObsType
-            The observation as defined by the environment.
-        """
+    def _update_observation(self) -> ObsType:
         # joint sensors
         joint_obs = np.zeros((3, len(self.actuated_joints)))
         joint_sensordata = self.physics.bind(self._joint_sensors).sensordata
@@ -1682,6 +1676,7 @@ class NeuroMechFly(gym.Env):
             self._update_vision()
             obs["vision"] = self._curr_visual_input.astype(np.float32)
 
+        self.current_observation = obs  # cache this
         return obs
 
     def get_reward(self):
@@ -1799,6 +1794,33 @@ class NeuroMechFly(gym.Env):
         """Close the environment, save data, and release any resources."""
         if self.render_mode == "saved" and self.output_dir is not None:
             self.save_video(self.output_dir / "video.mp4")
+    
+    def get_observation(self) -> ObsType:
+        """
+        .. warning:: 
+            This method is deprecated and will be removed in the future.
+            Use ``.current_observation`` instead.
+
+        Get observation without stepping the physics simulation.
+
+        Returns
+        -------
+        ObsType
+            The observation as defined by the environment.
+        """
+        logging.warning(
+            "Deprecation warning: `.get_observation()` is deprecated and will be "
+            "removed in the future. Use `.current_observation` instead."
+        )
+        return self.current_observation
+    
+    @property
+    def curr_time(self):
+        logging.warning(
+            "Deprecation warning: `.curr_time` is deprecated and will be "
+            "removed in the future. Use `.current_time` instead."
+        )
+        return self.current_time
 
 
 class MuJoCoParameters(Parameters):

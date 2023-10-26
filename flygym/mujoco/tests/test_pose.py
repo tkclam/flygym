@@ -19,8 +19,8 @@ def test_stretched_pose():
     amp = 0.9
 
     obs_list = []
-    while nmf.curr_time <= run_time:
-        joint_pos = amp * np.sin(freq * nmf.curr_time + phase)
+    while nmf.current_time <= run_time:
+        joint_pos = amp * np.sin(freq * nmf.current_time + phase)
         action = {"joints": joint_pos}
         obs, reward, terminated, truncated, info = nmf.step(action)
         obs_list.append(obs)
@@ -42,8 +42,8 @@ def test_zero_pose():
     amp = 0.9
 
     obs_list = []
-    while nmf.curr_time <= run_time:
-        joint_pos = amp * np.sin(freq * nmf.curr_time + phase)
+    while nmf.current_time <= run_time:
+        joint_pos = amp * np.sin(freq * nmf.current_time + phase)
         action = {"joints": joint_pos}
         obs, reward, terminated, truncated, info = nmf.step(action)
         obs_list.append(obs)
@@ -65,8 +65,8 @@ def test_tripod_pose():
     amp = 0.9
 
     obs_list = []
-    while nmf.curr_time <= run_time:
-        joint_pos = amp * np.sin(freq * nmf.curr_time + phase)
+    while nmf.current_time <= run_time:
+        joint_pos = amp * np.sin(freq * nmf.current_time + phase)
         action = {"joints": joint_pos}
         obs, reward, terminated, truncated, info = nmf.step(action)
         obs_list.append(obs)
