@@ -197,7 +197,6 @@ class FlatTerrain(BaseArena):
             type="2d",
             builtin="checker",
             width=300,
-
             height=300,
             rgb1=(0.3, 0.3, 0.3),
             rgb2=(0.4, 0.4, 0.4),
