@@ -197,6 +197,7 @@ paths:
   mjcf:
     deepfly3d: mjcf/neuromechfly_deepfly3d_kinorder_ryp.xml
     deepfly3d_old: mjcf/neuromechfly_deepfly3d_kinorder_ryp_old.xml
+    deepfly3d_original: mjcf/neuromechfly_deepfly3d_kinorder_ryp_orig.xml
     seqik: mjcf/neuromechfly_seqik_kinorder_ypr.xml
     seqik_old: mjcf/neuromechfly_seqik_kinorder_ypr_old.xml
   ommatidia_id_map: vision/ommatidia_id_map.npy
