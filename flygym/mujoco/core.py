@@ -494,7 +494,7 @@ class NeuroMechFly(gym.Env):
         self.contact_sensor_placements = [
             f"Animat/{body}" for body in self.contact_sensor_placements
         ]
-       
+
         # Those need to be in the same order as the adhesion sensor
         # (due to comparison with the last adhesion_signal)
         adhesion_sensor_indices = []
