@@ -344,7 +344,7 @@ class NeuroMechFly(gym.Env):
         if arena is None:
             arena = FlatTerrain()
         self.sim_params = deepcopy(sim_params)
-        self.actuated_joints = actuated_joints
+        self.actuated_joints = deepcopy(actuated_joints)
         self.contact_sensor_placements = contact_sensor_placements
         self.timestep = sim_params.timestep
         if output_dir is not None:
@@ -451,6 +451,7 @@ class NeuroMechFly(gym.Env):
             self.model.find("actuator", f"actuator_{control}_{joint}")
             for joint in actuated_joints
         ]
+
         self._set_actuators_gain()
         self._set_geoms_friction()
         self._set_joints_stiffness_and_damping()
@@ -478,6 +479,10 @@ class NeuroMechFly(gym.Env):
             self_collision_geoms
         )
 
+        self._adhesion_actuators = self._add_adhesion_actuators(
+            self.sim_params.adhesion_force
+        )
+
         # Add sensors
         self._joint_sensors = self._add_joint_sensors()
         self._body_sensors = self._add_body_sensors()
@@ -489,9 +494,7 @@ class NeuroMechFly(gym.Env):
         self.contact_sensor_placements = [
             f"Animat/{body}" for body in self.contact_sensor_placements
         ]
-        self._adhesion_actuators = self._add_adhesion_actuators(
-            self.sim_params.adhesion_force
-        )
+       
         # Those need to be in the same order as the adhesion sensor
         # (due to comparison with the last adhesion_signal)
         adhesion_sensor_indices = []
