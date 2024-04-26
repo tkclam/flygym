@@ -41,9 +41,9 @@ right_leg_inversion = [1, -1, -1, 1, -1, 1, 1]
 
 stumbling_force_threshold = -1
 
-correction_rates = {"retraction": (800, 700), "stumbling": (2200, 1800)}
+correction_rates = {"overstretch": (800, 700), "stumbling": (2200, 1800)}
 max_increment = 80
-retraction_persistance = 20
+overstretch_persistance = 20
 persistance_init_thr = 20
 
 
@@ -67,7 +67,7 @@ def run_hybrid_simulation(sim, cpg_network, preprogrammed_steps, run_time):
             step_points, increment_vals, kind="linear", fill_value="extrapolate"
         )
 
-    retraction_correction = np.zeros(6)
+    overstretch_correction = np.zeros(6)
     stumbling_correction = np.zeros(6)
 
     detected_segments = ["Tibia", "Tarsus1", "Tarsus2"]
@@ -85,28 +85,28 @@ def run_hybrid_simulation(sim, cpg_network, preprogrammed_steps, run_time):
     obs_hist = []
     info_hist = []
 
-    retraction_perisitance_counter = np.zeros(6)
+    overstretch_perisitance_counter = np.zeros(6)
 
-    retraction_persistance_counter_hist = np.zeros((6, target_num_steps))
+    overstretch_persistance_counter_hist = np.zeros((6, target_num_steps))
 
     for k in trange(target_num_steps):
-        # retraction rule: does a leg need to be retracted from a hole?
+        # overstretch rule: does a leg need to be retracted from a hole?
         end_effector_z_pos = obs["fly"][0][2] - obs["end_effectors"][:, 2]
         end_effector_z_pos_sorted_idx = np.argsort(end_effector_z_pos)
         end_effector_z_pos_sorted = end_effector_z_pos[end_effector_z_pos_sorted_idx]
         if end_effector_z_pos_sorted[-1] > end_effector_z_pos_sorted[-3] + 0.05:
-            leg_to_correct_retraction = end_effector_z_pos_sorted_idx[-1]
-            if retraction_correction[leg_to_correct_retraction] > persistance_init_thr:
-                retraction_perisitance_counter[leg_to_correct_retraction] = 1
+            leg_to_correct_overstretch = end_effector_z_pos_sorted_idx[-1]
+            if overstretch_correction[leg_to_correct_overstretch] > persistance_init_thr:
+                overstretch_perisitance_counter[leg_to_correct_overstretch] = 1
         else:
-            leg_to_correct_retraction = None
+            leg_to_correct_overstretch = None
 
         # update persistance counter
-        retraction_perisitance_counter[retraction_perisitance_counter > 0] += 1
-        retraction_perisitance_counter[
-            retraction_perisitance_counter > retraction_persistance
+        overstretch_perisitance_counter[overstretch_perisitance_counter > 0] += 1
+        overstretch_perisitance_counter[
+            overstretch_perisitance_counter > overstretch_persistance
         ] = 0
-        retraction_persistance_counter_hist[:, k] = retraction_perisitance_counter
+        overstretch_persistance_counter_hist[:, k] = overstretch_perisitance_counter
 
         cpg_network.step()
         joints_angles = []
@@ -115,16 +115,16 @@ def run_hybrid_simulation(sim, cpg_network, preprogrammed_steps, run_time):
         all_net_corrections = np.zeros(6)
 
         for i, leg in enumerate(preprogrammed_steps.legs):
-            # update amount of retraction correction
+            # update amount of overstretch correction
             if (
-                i == leg_to_correct_retraction or retraction_perisitance_counter[i] > 0
+                i == leg_to_correct_overstretch or overstretch_perisitance_counter[i] > 0
             ):  # lift leg
-                increment = correction_rates["retraction"][0] * sim.timestep
-                retraction_correction[i] += increment
+                increment = correction_rates["overstretch"][0] * sim.timestep
+                overstretch_correction[i] += increment
                 sim.fly.change_segment_color(sim.physics, f"{leg}Tibia", (1, 0, 0, 1))
             else:  # condition no longer met, lower leg
-                decrement = correction_rates["retraction"][1] * sim.timestep
-                retraction_correction[i] = max(0, retraction_correction[i] - decrement)
+                decrement = correction_rates["overstretch"][1] * sim.timestep
+                overstretch_correction[i] = max(0, overstretch_correction[i] - decrement)
                 sim.fly.change_segment_color(
                     sim.physics, f"{leg}Tibia", (0.5, 0.5, 0.5, 1)
                 )
@@ -141,14 +141,14 @@ def run_hybrid_simulation(sim, cpg_network, preprogrammed_steps, run_time):
             else:
                 decrement = correction_rates["stumbling"][1] * sim.timestep
                 stumbling_correction[i] = max(0, stumbling_correction[i] - decrement)
-                if retraction_correction[i] <= 0:
+                if overstretch_correction[i] <= 0:
                     sim.fly.change_segment_color(
                         sim.physics, f"{leg}Femur", (0.5, 0.5, 0.5, 1)
                     )
 
-            # retraction correction is prioritized
-            if retraction_correction[i] > 0:
-                net_correction = retraction_correction[i]
+            # overstretch correction is prioritized
+            if overstretch_correction[i] > 0:
+                net_correction = overstretch_correction[i]
                 stumbling_correction[i] = 0
             else:
                 net_correction = stumbling_correction[i]

@@ -37,7 +37,7 @@ _default_correction_vectors = {
     "H": np.array([0, 0, 0, -0.02, 0, 0.01, -0.02]),
 }
 
-_default_correction_rates = {"retraction": (800, 700), "stumbling": (2200, 1800)}
+_default_correction_rates = {"overstretch": (800, 700), "stumbling": (2200, 1800)}
 
 
 class HybridTurningNMF(SingleFlySimulation):
@@ -59,8 +59,8 @@ class HybridTurningNMF(SingleFlySimulation):
         amplitude_range=(-0.5, 1.5),
         draw_corrections=False,
         max_increment=80,
-        retraction_perisistance=20,
-        retraction_persistance_initiation_threshold=20,
+        rule_persistance=20,
+        overstretch_persistance_initiation_threshold=20,
         seed=0,
         **kwargs,
     ):
@@ -90,11 +90,11 @@ class HybridTurningNMF(SingleFlySimulation):
         self.amplitude_range = amplitude_range
         self.draw_corrections = draw_corrections
         self.max_increment = max_increment
-        self.retraction_perisistance = retraction_perisistance
-        self.retraction_persistance_initiation_threshold = (
-            retraction_persistance_initiation_threshold
+        self.rule_persistance = rule_persistance
+        self.overstretch_persistance_initiation_threshold = (
+            overstretch_persistance_initiation_threshold
         )
-        self.retraction_perisitance_counter = np.zeros(6)
+        self.overstretch_perisitance_counter = np.zeros(6)
         self.right_leg_inversion = [1, -1, -1, 1, -1, 1, 1]
 
         # Define action and observation spaces
@@ -114,7 +114,7 @@ class HybridTurningNMF(SingleFlySimulation):
         )
 
         # Initialize variables tracking the correction amount
-        self.retraction_correction = np.zeros(6)
+        self.overstretch_correction = np.zeros(6)
         self.stumbling_correction = np.zeros(6)
 
         # Find stumbling sensors
@@ -164,32 +164,32 @@ class HybridTurningNMF(SingleFlySimulation):
             )
         return stumbling_sensors
 
-    def _retraction_rule_find_leg(self, obs):
+    def _overstretch_rule_find_leg(self, obs):
         """Returns the index of the leg that needs to be retracted, or None
         if none applies."""
         end_effector_z_pos = obs["fly"][0][2] - obs["end_effectors"][:, 2]
         end_effector_z_pos_sorted_idx = np.argsort(end_effector_z_pos)
         end_effector_z_pos_sorted = end_effector_z_pos[end_effector_z_pos_sorted_idx]
         if end_effector_z_pos_sorted[-1] > end_effector_z_pos_sorted[-3] + 0.05:
-            leg_to_correct_retraction = end_effector_z_pos_sorted_idx[-1]
+            leg_to_correct_overstretch = end_effector_z_pos_sorted_idx[-1]
             if (
-                self.retraction_correction[leg_to_correct_retraction]
-                > self.retraction_persistance_initiation_threshold
+                self.overstretch_correction[leg_to_correct_overstretch]
+                > self.overstretch_persistance_initiation_threshold
             ):
-                self.retraction_perisitance_counter[leg_to_correct_retraction] = 1
+                self.overstretch_perisitance_counter[leg_to_correct_overstretch] = 1
         else:
-            leg_to_correct_retraction = None
-        return leg_to_correct_retraction
+            leg_to_correct_overstretch = None
+        return leg_to_correct_overstretch
 
     def _update_persistance_counter(self):
         # increment every nonzero counter
-        self.retraction_perisitance_counter[
-            self.retraction_perisitance_counter > 0
+        self.overstretch_perisitance_counter[
+            self.overstretch_perisitance_counter > 0
         ] += 1
         # zero the increment when reaching the threshold
-        self.retraction_perisitance_counter[
-            self.retraction_perisitance_counter
-            > self.retraction_persistance_initiation_threshold
+        self.overstretch_perisitance_counter[
+            self.overstretch_perisitance_counter
+            > self.overstretch_persistance_initiation_threshold
         ] = 0
 
     def _stumbling_rule_check_condition(self, obs, leg):
@@ -201,10 +201,10 @@ class HybridTurningNMF(SingleFlySimulation):
         force_proj = np.dot(contact_forces, fly_orientation)
         return (force_proj < self.stumbling_force_threshold).any()
 
-    def _get_net_correction(self, retraction_correction, stumbling_correction):
-        """Retraction correction has priority."""
-        if retraction_correction > 0:
-            return retraction_correction, True
+    def _get_net_correction(self, overstretch_correction, stumbling_correction):
+        """overstretch correction has priority."""
+        if overstretch_correction > 0:
+            return overstretch_correction, True
         return stumbling_correction, False
 
     def _update_correction_amount(
@@ -247,7 +247,7 @@ class HybridTurningNMF(SingleFlySimulation):
         self.cpg_network.intrinsic_amps = self.intrinsic_amps
         self.cpg_network.intrinsic_freqs = self.intrinsic_freqs
         self.cpg_network.reset(init_phases, init_magnitudes)
-        self.retraction_correction = np.zeros(6)
+        self.overstretch_correction = np.zeros(6)
         self.stumbling_correction = np.zeros(6)
         return obs, info
 
@@ -271,10 +271,10 @@ class HybridTurningNMF(SingleFlySimulation):
         # get current observation
         obs = super().get_observation()
 
-        # Retraction rule: is any leg stuck in a gap and needing to be retracted?
-        leg_to_correct_retraction = self._retraction_rule_find_leg(obs)
+        # overstretch rule: is any leg stuck in a gap and needing to be retracted?
+        leg_to_correct_overstretch = self._overstretch_rule_find_leg(obs)
         self._update_persistance_counter()
-        persistent_retraction = self.retraction_perisitance_counter > 0
+        persistent_overstretch = self.overstretch_perisitance_counter > 0
 
         self.cpg_network.step()
 
@@ -282,16 +282,16 @@ class HybridTurningNMF(SingleFlySimulation):
         adhesion_onoff = []
         all_net_corrections = []
         for i, leg in enumerate(self.preprogrammed_steps.legs):
-            # update retraction correction amounts
-            retraction_correction, is_retracted = self._update_correction_amount(
+            # update overstretch correction amounts
+            overstretch_correction, is_retracted = self._update_correction_amount(
                 condition=(
-                    (i == leg_to_correct_retraction) or persistent_retraction[i]
+                    (i == leg_to_correct_overstretch) or persistent_overstretch[i]
                 ),  # lift leg
-                curr_amount=self.retraction_correction[i],
-                correction_rates=self.correction_rates["retraction"],
+                curr_amount=self.overstretch_correction[i],
+                correction_rates=self.correction_rates["overstretch"],
                 viz_segment=f"{leg}Tibia" if self.draw_corrections else None,
             )
-            self.retraction_correction[i] = retraction_correction
+            self.overstretch_correction[i] = overstretch_correction
 
             # update stumbling correction amounts
             self.stumbling_correction[i], is_stumbling = self._update_correction_amount(
@@ -299,13 +299,13 @@ class HybridTurningNMF(SingleFlySimulation):
                 curr_amount=self.stumbling_correction[i],
                 correction_rates=self.correction_rates["stumbling"],
                 viz_segment=f"{leg}Femur"
-                if self.draw_corrections and retraction_correction <= 0
+                if self.draw_corrections and overstretch_correction <= 0
                 else None,
             )
 
             # get net correction amount
             net_correction, reset_stumbing = self._get_net_correction(
-                self.retraction_correction[i], self.stumbling_correction[i]
+                self.overstretch_correction[i], self.stumbling_correction[i]
             )
             if reset_stumbing:
                 self.stumbling_correction[i] = 0.0
