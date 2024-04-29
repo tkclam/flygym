@@ -16,6 +16,7 @@ from flygym.examples.plume_tracking import (
 
 from dm_control.mujoco import Camera as dm_Camera
 
+
 def eprint(*args, **kwargs):
     """Print log to stderr so that the buffer gets flushed immediately."""
     print(*args, file=stderr, **kwargs)
@@ -34,7 +35,8 @@ def get_walking_icons():
         WalkingState.STOP: icons["stop"],
     }
 
-def draw_past_trajectory(image, fly_pos, camera_matrix):    
+
+def draw_past_trajectory(image, fly_pos, camera_matrix):
     xs_physical = fly_pos[:, 0]
     ys_physical = fly_pos[:, 1]
     xyz1_vecs = np.ones((xs_physical.size, 4))
@@ -45,7 +47,7 @@ def draw_past_trajectory(image, fly_pos, camera_matrix):
     xs_display /= display_scale
     ys_display /= display_scale
     pos_display = np.vstack((xs_display, ys_display))
-    
+
     cv2.polylines(
         image,
         [pos_display.T.astype(int)],
@@ -57,11 +59,12 @@ def draw_past_trajectory(image, fly_pos, camera_matrix):
     return image
 
 
-def add_icon_to_image(image, icon, text_pos): 
+def add_icon_to_image(image, icon, text_pos):
     sel = image[
-                text_pos[1]-icon.shape[0]-20:text_pos[1]-20,
-                text_pos[0]:text_pos[0] + icon.shape[1],
-                :]
+        text_pos[1] - icon.shape[0] - 20 : text_pos[1] - 20,
+        text_pos[0] : text_pos[0] + icon.shape[1],
+        :,
+    ]
     mask = icon[:, :, 3] > 0
     sel[mask] = icon[mask, :3]
 
@@ -73,7 +76,7 @@ def run_simulation(
     initial_position=(180, 80),
     live_display=False,
     is_control=False,
-    run_time=0.1,
+    run_time=60.0,
 ):
     arena = OdorPlumeArena(plume_dataset_path)
 
@@ -92,11 +95,25 @@ def run_simulation(
         spawn_pos=(*initial_position, 0.25),
         spawn_orientation=(0, 0, -np.pi / 2),
     )
-    
-    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True)#, window_size=(920, 720))
-    closeup_cam = Camera(fly=fly, camera_id="Animat/camera_top", play_speed=0.5, timestamp_text=False, play_speed_text=False)
+
+    cam = Camera(
+        fly=fly,
+        camera_id="birdeye_cam",
+        play_speed=0.5,
+        timestamp_text=True,
+        window_size=(920, 720),
+    )
+    closeup_cam = Camera(
+        fly=fly,
+        camera_id="Animat/camera_top",
+        play_speed=0.5,
+        timestamp_text=False,
+        play_speed_text=False,
+    )
     # rotate and zoom in the closeup camera
-    closeup_cam_model = closeup_cam.fly.model.find("camera", closeup_cam.camera_id.split("/")[1])
+    closeup_cam_model = closeup_cam.fly.model.find(
+        "camera", closeup_cam.camera_id.split("/")[1]
+    )
     closeup_cam_model.euler = np.array([0, 0, np.pi])
 
     sim = PlumeNavigationTask(
@@ -126,7 +143,10 @@ def run_simulation(
     icons = get_walking_icons()
     encounter_threshold = 0.001
 
-    first_text_pos = (20, cam.window_size[1] - 30 - 20) # offset to print rest of the text underneath
+    first_text_pos = (
+        20,
+        cam.window_size[1] - 30 - 20,
+    )  # offset to print rest of the text underneath
     second_test_pos = (20, cam.window_size[1] - 30)
     fly_pos = []
 
@@ -175,21 +195,24 @@ def run_simulation(
 
             # add past trajectory
             # project to the camera coordinates
-            fly_pos.append(obs["fly"][0][:2].copy())
+            fly_pos.append(obs["fly"][0][:2])
 
-            rendered_img = draw_past_trajectory(rendered_img,
-                                                np.array(fly_pos),
-                                                birdeye_cam_matrix)
-            
-            # resample the rendered image
-            #rendered_img = cv2.resize(rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST)
+            rendered_img = draw_past_trajectory(
+                rendered_img, np.array(fly_pos), birdeye_cam_matrix
+            )
+
+            # resample the rendered image
+            rendered_img = cv2.resize(
+                rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST
+            )
             # add the other camera view in the bottom right
             zoom_in_img = rendered_imgs[1]
             # add border to the zoom in image
-            zoom_in_img = cv2.resize(zoom_in_img, (0, 0), fx=0.3, fy=0.3, interpolation=cv2.INTER_NEAREST)
-            zoom_in_img = cv2.copyMakeBorder(zoom_in_img, 5, 5, 5, 5, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-            rendered_img[-zoom_in_img.shape[0]:, -zoom_in_img.shape[1]:] = zoom_in_img
-            
+            zoom_in_img = cv2.copyMakeBorder(
+                zoom_in_img, 5, 5, 5, 5, cv2.BORDER_CONSTANT, value=(0, 0, 0)
+            )
+            rendered_img[-zoom_in_img.shape[0] :, -zoom_in_img.shape[1] :] = zoom_in_img
+
             sim.cameras[0]._frames[-1] = rendered_img
 
             # if obs["odor_intensity"].max() > encounter_threshold:
@@ -252,9 +275,7 @@ if __name__ == "__main__":
         ]
 
         # Run the simulations in parallel
-        Parallel(n_jobs=-2)(
-            delayed(process_trial)(*config) for config in configs
-        )
+        Parallel(n_jobs=-2)(delayed(process_trial)(*config) for config in configs)
     finally:
         # Clean up the shared memory
         plume_dataset_shm_path.unlink()

@@ -17,7 +17,7 @@ points = np.vstack((xx.flat, yy.flat)).T
 initial_position = points[12]
 
 try:
-    output_dir = Path(mkdtemp())
+    output_dir = Path("./outputs/plume_tracking/plume_dataset/sim_results/")
     sim = run_simulation(
         plume_dataset_path,
         output_dir,
@@ -25,9 +25,10 @@ try:
         initial_position=initial_position,
         is_control=False,
         live_display=False,
-        run_time=0.8,
+        run_time=2.0,
     )
     img = sim.cameras[0]._frames[-1]
     cv2.imwrite(str(output_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 finally:
-    rmtree(output_dir)
+    pass
+    # rmtree(output_dir)
