@@ -17,7 +17,6 @@ class PlumeNavigationTask(HybridTurningNMF):
         self.arena: OdorPlumeArena = kwargs["arena"]
         self._plume_last_update_time = -np.inf
         self._cached_plume_img = None
-        self._cached_focus_plume_img = None
         self._render_plume_alpha = render_plume_alpha
         self._intensity_display_vmax = intensity_display_vmax
 
@@ -106,7 +105,6 @@ class PlumeNavigationTask(HybridTurningNMF):
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
-        self._fly_last_pos = obs["fly"][0][:2]
         if np.isnan(obs["odor_intensity"]).any():
             truncated = True
         # if self.arena.is_in_target(*obs["fly"][0, :2]):
@@ -163,7 +161,7 @@ class PlumeNavigationTask(HybridTurningNMF):
         y_plume_idxs = (ys_physical_fov.flatten() / self.arena.dimension_scale_factor).astype(int)
 
         # not sure those ids are all valid ... for now this is not a problem for the top camera
-        plume_values = self.arena.plume_grid[t_idx][y_plume_idxs, x_plume_idxs]
+        plume_values = self.arena.plume_grid[t_idx][y_plume_idxs, x_plume_idxs].copy()
         interp = LinearNDInterpolator(np.stack([xs_display, ys_display], axis=1), plume_values, fill_value=np.nan)
 
         # interp to match display meshgrid

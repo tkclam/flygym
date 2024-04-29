@@ -93,7 +93,7 @@ def run_simulation(
         spawn_orientation=(0, 0, -np.pi / 2),
     )
     
-    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True, window_size=(920, 720))
+    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True)#, window_size=(920, 720))
     closeup_cam = Camera(fly=fly, camera_id="Animat/camera_top", play_speed=0.5, timestamp_text=False, play_speed_text=False)
     # rotate and zoom in the closeup camera
     closeup_cam_model = closeup_cam.fly.model.find("camera", closeup_cam.camera_id.split("/")[1])
@@ -182,10 +182,11 @@ def run_simulation(
                                                 birdeye_cam_matrix)
             
             # resample the rendered image
-            rendered_img = cv2.resize(rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST)
+            #rendered_img = cv2.resize(rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST)
             # add the other camera view in the bottom right
             zoom_in_img = rendered_imgs[1]
             # add border to the zoom in image
+            zoom_in_img = cv2.resize(zoom_in_img, (0, 0), fx=0.3, fy=0.3, interpolation=cv2.INTER_NEAREST)
             zoom_in_img = cv2.copyMakeBorder(zoom_in_img, 5, 5, 5, 5, cv2.BORDER_CONSTANT, value=(0, 0, 0))
             rendered_img[-zoom_in_img.shape[0]:, -zoom_in_img.shape[1]:] = zoom_in_img
             
