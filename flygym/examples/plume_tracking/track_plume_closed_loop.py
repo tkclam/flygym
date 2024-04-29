@@ -34,14 +34,7 @@ def get_walking_icons():
         WalkingState.STOP: icons["stop"],
     }
 
-def draw_past_trajectory(image, sim, fly_pos, cam):    
-    birdeye_cam_dm_control_obj = dm_Camera(
-        sim.physics,
-        camera_id=cam.camera_id,
-        width=sim.cameras[0].window_size[0],
-        height=sim.cameras[0].window_size[1],
-    )
-    camera_matrix = birdeye_cam_dm_control_obj.matrix
+def draw_past_trajectory(image, fly_pos, camera_matrix):    
     xs_physical = fly_pos[:, 0]
     ys_physical = fly_pos[:, 1]
     xyz1_vecs = np.ones((xs_physical.size, 4))
@@ -99,8 +92,8 @@ def run_simulation(
         spawn_pos=(*initial_position, 0.25),
         spawn_orientation=(0, 0, -np.pi / 2),
     )
-    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True, window_size=(920, 720))
     
+    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True, window_size=(920, 720))
     closeup_cam = Camera(fly=fly, camera_id="Animat/camera_top", play_speed=0.5, timestamp_text=False, play_speed_text=False)
     # rotate and zoom in the closeup camera
     closeup_cam_model = closeup_cam.fly.model.find("camera", closeup_cam.camera_id.split("/")[1])
@@ -111,6 +104,15 @@ def run_simulation(
         arena=arena,
         cameras=[cam, closeup_cam],
     )
+
+    birdeye_cam_dm_control_obj = dm_Camera(
+        sim.physics,
+        camera_id=cam.camera_id,
+        width=sim.cameras[0].window_size[0],
+        height=sim.cameras[0].window_size[1],
+    )
+    birdeye_cam_matrix = birdeye_cam_dm_control_obj.matrix
+
     if is_control:
         controller = PlumeNavigationController(
             dt=sim.timestep,
@@ -173,10 +175,11 @@ def run_simulation(
 
             # add past trajectory
             # project to the camera coordinates
-            fly_pos.append(obs["fly"][0][:2])
+            fly_pos.append(obs["fly"][0][:2].copy())
 
             rendered_img = draw_past_trajectory(rendered_img,
-                                                 sim, np.array(fly_pos), cam)
+                                                np.array(fly_pos),
+                                                birdeye_cam_matrix)
             
             # resample the rendered image
             rendered_img = cv2.resize(rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST)
@@ -207,6 +210,7 @@ def run_simulation(
 
     filename_stem = f"plume_navigation_seed{seed}_control{is_control}"
     cam.save_video(output_dir / (filename_stem + ".mp4"))
+    print((output_dir / (filename_stem + ".mp4")).absolute())
     with open(output_dir / (filename_stem + ".pkl"), "wb") as f:
         pickle.dump({"obs_hist": obs_hist, "reward": reward}, f)
     return sim
@@ -214,7 +218,7 @@ def run_simulation(
 
 def process_trial(plume_dataset_path, output_dir, seed, initial_position, is_control):
     try:
-        return run_simulation(
+        run_simulation(
             plume_dataset_path,
             output_dir,
             seed,
@@ -247,7 +251,7 @@ if __name__ == "__main__":
         ]
 
         # Run the simulations in parallel
-        results = Parallel(n_jobs=-2)(
+        Parallel(n_jobs=-2)(
             delayed(process_trial)(*config) for config in configs
         )
     finally:

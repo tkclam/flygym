@@ -122,10 +122,24 @@ class PlumeNavigationTask(HybridTurningNMF):
         fc_x_fov = fc_y_fov * self.fc_width/self.fc_height
 
         # get a grid of points in the physical flygym space centered arround the fly 
-        xs_physical_fov, ys_physical_fov = np.meshgrid(
-            np.arange(0, np.ceil(fc_x_fov).astype(int)+5, self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[0] - 3,
-            np.arange(0, np.ceil(fc_y_fov).astype(int)+5, self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[1] - 3,
-        )
+        xs_physical_fov = np.arange(0,
+                                     np.ceil(fc_x_fov).astype(int)+5,
+                                       self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[0] - 3
+        ys_physical_fov = np.arange(0,
+                                    np.ceil(fc_y_fov).astype(int)+5,
+                                    self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[1] - 3
+        
+        # get the invalid plume simulation indexes 
+        invalid_xs = np.logical_or(xs_physical_fov / self.arena.dimension_scale_factor < 0,
+                                        xs_physical_fov / self.arena.dimension_scale_factor >= self.arena.plume_grid.shape[2])
+        invalid_ys = np.logical_or(ys_physical_fov / self.arena.dimension_scale_factor < 0,
+                                        ys_physical_fov / self.arena.dimension_scale_factor >= self.arena.plume_grid.shape[1])
+        # remove them from the xs and ys
+        xs_physical_fov = xs_physical_fov[~invalid_xs]
+        ys_physical_fov = ys_physical_fov[~invalid_ys]
+        # get the plume intensities at the physical points
+
+        xs_physical_fov, ys_physical_fov = np.meshgrid(xs_physical_fov, ys_physical_fov)
         focus_dm_cam = dm_Camera(
                 self.physics,
                 camera_id=self.cameras[1].camera_id,
@@ -138,7 +152,6 @@ class PlumeNavigationTask(HybridTurningNMF):
         xyz1_vecs[:, 1] = ys_physical_fov.flatten()
         xyz1_vecs[:, 2] = 0
         xyz1_vecs = xyz1_vecs
-        pos_physical = xyz1_vecs[:, :2].reshape(*xs_physical_fov.shape, 2)
         xs_display, ys_display, display_scale = camera_matrix @ xyz1_vecs.T
         xs_display /= display_scale
         ys_display /= display_scale
@@ -148,12 +161,6 @@ class PlumeNavigationTask(HybridTurningNMF):
         # get the plume intensities at the physical points
         x_plume_idxs = (xs_physical_fov.flatten() / self.arena.dimension_scale_factor).astype(int)
         y_plume_idxs = (ys_physical_fov.flatten() / self.arena.dimension_scale_factor).astype(int)
-
-        # get out of range indexes 
-        # x_plume_idxs[x_plume_idxs < 0] = -1
-        # y_plume_idxs[y_plume_idxs < 0] = -1
-        # x_plume_idxs[x_plume_idxs >= self.arena.plume_grid.shape[2]] = -1
-        # y_plume_idxs[y_plume_idxs >= self.arena.plume_grid.shape[1]] = -1
 
         # not sure those ids are all valid ... for now this is not a problem for the top camera
         plume_values = self.arena.plume_grid[t_idx][y_plume_idxs, x_plume_idxs]
