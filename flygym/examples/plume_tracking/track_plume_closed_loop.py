@@ -14,6 +14,7 @@ from flygym.examples.plume_tracking import (
     PlumeNavigationTask,
 )
 
+from dm_control.mujoco import Camera as dm_Camera
 
 def eprint(*args, **kwargs):
     """Print log to stderr so that the buffer gets flushed immediately."""
@@ -33,9 +34,41 @@ def get_walking_icons():
         WalkingState.STOP: icons["stop"],
     }
 
+def draw_past_trajectory(image, sim, fly_pos, cam):    
+    birdeye_cam_dm_control_obj = dm_Camera(
+        sim.physics,
+        camera_id=cam.camera_id,
+        width=sim.cameras[0].window_size[0],
+        height=sim.cameras[0].window_size[1],
+    )
+    camera_matrix = birdeye_cam_dm_control_obj.matrix
+    xs_physical = fly_pos[:, 0]
+    ys_physical = fly_pos[:, 1]
+    xyz1_vecs = np.ones((xs_physical.size, 4))
+    xyz1_vecs[:, 0] = xs_physical.flatten()
+    xyz1_vecs[:, 1] = ys_physical.flatten()
+    xyz1_vecs[:, 2] = 0
+    xs_display, ys_display, display_scale = camera_matrix @ xyz1_vecs.T
+    xs_display /= display_scale
+    ys_display /= display_scale
+    pos_display = np.vstack((xs_display, ys_display))
+    
+    cv2.polylines(
+        image,
+        [pos_display.T.astype(int)],
+        isClosed=False,
+        color=(255, 0, 0),
+        thickness=1,
+        lineType=cv2.LINE_AA,
+    )
+    return image
 
-def add_icon_to_image(image, icon):
-    sel = image[: icon.shape[0], -icon.shape[1] :, :]
+
+def add_icon_to_image(image, icon, text_pos): 
+    sel = image[
+                text_pos[1]-icon.shape[0]-20:text_pos[1]-20,
+                text_pos[0]:text_pos[0] + icon.shape[1],
+                :]
     mask = icon[:, :, 3] > 0
     sel[mask] = icon[mask, :3]
 
@@ -47,7 +80,7 @@ def run_simulation(
     initial_position=(180, 80),
     live_display=False,
     is_control=False,
-    run_time=60,
+    run_time=0.1,
 ):
     arena = OdorPlumeArena(plume_dataset_path)
 
@@ -66,11 +99,17 @@ def run_simulation(
         spawn_pos=(*initial_position, 0.25),
         spawn_orientation=(0, 0, -np.pi / 2),
     )
-    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True)
+    cam = Camera(fly=fly, camera_id="birdeye_cam", play_speed=0.5, timestamp_text=True, window_size=(920, 720))
+    
+    closeup_cam = Camera(fly=fly, camera_id="Animat/camera_top", play_speed=0.5, timestamp_text=False, play_speed_text=False)
+    # rotate and zoom in the closeup camera
+    closeup_cam_model = closeup_cam.fly.model.find("camera", closeup_cam.camera_id.split("/")[1])
+    closeup_cam_model.euler = np.array([0, 0, np.pi])
+
     sim = PlumeNavigationTask(
         fly=fly,
         arena=arena,
-        cameras=[cam],
+        cameras=[cam, closeup_cam],
     )
     if is_control:
         controller = PlumeNavigationController(
@@ -113,6 +152,15 @@ def run_simulation(
                 1,
                 cv2.LINE_AA,
             )
+            # add the past trajectory
+            cv2.polylines(
+                rendered_img,
+                [np.array(obs_hist)[:, 0, :2].astype(np.int32)],
+                isClosed=False,
+                color=(0, 255, 0),
+                thickness=1,
+            )
+
             # if obs["odor_intensity"].max() > encounter_threshold:
             #     cv2.putText(
             #         rendered_img,

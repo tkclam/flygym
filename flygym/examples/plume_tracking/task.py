@@ -4,6 +4,7 @@ from numba import njit, prange
 from flygym.examples.turning_controller import HybridTurningNMF
 from flygym.examples.plume_tracking.arena import OdorPlumeArena
 
+from dm_control.mujoco import Camera as dm_Camera
 
 class PlumeNavigationTask(HybridTurningNMF):
     def __init__(
@@ -16,6 +17,7 @@ class PlumeNavigationTask(HybridTurningNMF):
         self.arena: OdorPlumeArena = kwargs["arena"]
         self._plume_last_update_time = -np.inf
         self._cached_plume_img = None
+        self._cached_focus_plume_img = None
         self._render_plume_alpha = render_plume_alpha
         self._intensity_display_vmax = intensity_display_vmax
 
@@ -47,10 +49,19 @@ class PlumeNavigationTask(HybridTurningNMF):
         # the simulated arena.
         self.grid_idx_all = grid_idx_all.astype(np.int16)
 
+        self.focus_cam = self.cameras[1] if len(self.cameras) > 1 else None
+        if self.focus_cam is not None:
+            self.fc_width, self.fc_height = self.focus_cam.window_size
+            pixel_meshgrid = np.meshgrid(np.arange(self.fc_width),
+                                          np.arange(self.fc_height))
+            self.pixel_idxs = np.stack([pixel_meshgrid[0].flatten(), pixel_meshgrid[1].flatten()], axis=1)
+
     def render(self, *args, **kwargs):
-        rendered_img = super().render(*args, **kwargs)[0]
+        imgs = super().render(*args, **kwargs)
+        rendered_img = imgs[0]
+        
         if rendered_img is None:
-            return [rendered_img]  # no image rendered
+            return [None, None]  # no image rendered
 
         # Overlay plume
         time_since_last_update = self.curr_time - self._plume_last_update_time
@@ -78,10 +89,24 @@ class PlumeNavigationTask(HybridTurningNMF):
 
         # Replace recorded image with modified one
         self.cameras[0]._frames[-1] = rendered_img
-        return [rendered_img]
+
+        # project the plume on the focused_img
+        if self.focus_cam is not None:
+            focus_img = imgs[1]
+            plume_focus = self.overlay_focused_plume(focus_img, t_idx)
+            # overlay plume focus on the focused image
+            plume_focus = plume_focus[:, :, np.newaxis] * self._render_plume_alpha
+            plume_focus[np.isnan(plume_focus)] = 0
+            focus_img = np.clip(focus_img - plume_focus * 255, 0, 255).astype(np.uint8)
+                    
+        else:
+            focus_img = None
+
+        return [rendered_img, focus_img]
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
+        self._fly_last_pos = obs["fly"][0][:2]
         if np.isnan(obs["odor_intensity"]).any():
             truncated = True
         # if self.arena.is_in_target(*obs["fly"][0, :2]):
@@ -89,7 +114,56 @@ class PlumeNavigationTask(HybridTurningNMF):
         #     reward = 1
         return obs, reward, terminated, truncated, info
 
+    def overlay_focused_plume(self, focus_img, t_idx):
+        # get the camera field of view in mm
+        fc_fov = np.deg2rad(self.physics.model.camera(self.cameras[1].camera_id).fovy)
+        fc_pos = self.physics.data.camera(self.cameras[1].camera_id).xpos
+        fc_y_fov = np.tan(fc_fov/2) * fc_pos[2] * 2
+        fc_x_fov = fc_y_fov * self.fc_width/self.fc_height
 
+        # get a grid of points in the physical flygym space centered arround the fly 
+        xs_physical_fov, ys_physical_fov = np.meshgrid(
+            np.arange(0, np.ceil(fc_x_fov).astype(int)+5, self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[0] - 3,
+            np.arange(0, np.ceil(fc_y_fov).astype(int)+5, self.arena.dimension_scale_factor) - int(fc_y_fov/2) + fc_pos[1] - 3,
+        )
+        focus_dm_cam = dm_Camera(
+                self.physics,
+                camera_id=self.cameras[1].camera_id,
+                width=self.cameras[1].window_size[0],
+                height=self.cameras[1].window_size[1],
+            )
+        camera_matrix = focus_dm_cam.matrix
+        xyz1_vecs = np.ones((xs_physical_fov.size, 4))
+        xyz1_vecs[:, 0] = xs_physical_fov.flatten()
+        xyz1_vecs[:, 1] = ys_physical_fov.flatten()
+        xyz1_vecs[:, 2] = 0
+        xyz1_vecs = xyz1_vecs
+        pos_physical = xyz1_vecs[:, :2].reshape(*xs_physical_fov.shape, 2)
+        xs_display, ys_display, display_scale = camera_matrix @ xyz1_vecs.T
+        xs_display /= display_scale
+        ys_display /= display_scale
+        pos_display = np.vstack((xs_display, ys_display))
+        pos_display = pos_display.T.reshape(*xs_physical_fov.shape, 2)
+
+        # get the plume intensities at the physical points
+        x_plume_idxs = (xs_physical_fov.flatten() / self.arena.dimension_scale_factor).astype(int)
+        y_plume_idxs = (ys_physical_fov.flatten() / self.arena.dimension_scale_factor).astype(int)
+
+        # get out of range indexes 
+        # x_plume_idxs[x_plume_idxs < 0] = -1
+        # y_plume_idxs[y_plume_idxs < 0] = -1
+        # x_plume_idxs[x_plume_idxs >= self.arena.plume_grid.shape[2]] = -1
+        # y_plume_idxs[y_plume_idxs >= self.arena.plume_grid.shape[1]] = -1
+
+        # not sure those ids are all valid ... for now this is not a problem for the top camera
+        plume_values = self.arena.plume_grid[t_idx][y_plume_idxs, x_plume_idxs]
+        interp = LinearNDInterpolator(np.stack([xs_display, ys_display], axis=1), plume_values, fill_value=np.nan)
+
+        # interp to match display meshgrid
+        plume_display = interp(self.pixel_idxs).reshape((self.fc_height, self.fc_width))
+
+        return plume_display
+        
 @njit(parallel=True)
 def _resample_plume_image(grid_idx_all, plume_grid):
     plume_img = np.zeros(grid_idx_all.shape[:2])
