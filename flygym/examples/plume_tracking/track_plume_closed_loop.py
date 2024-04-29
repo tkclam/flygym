@@ -124,6 +124,10 @@ def run_simulation(
     icons = get_walking_icons()
     encounter_threshold = 0.001
 
+    first_text_pos = (20, cam.window_size[1] - 30 - 20) # offset to print rest of the text underneath
+    second_test_pos = (20, cam.window_size[1] - 30)
+    fly_pos = []
+
     # Run the simulation
     obs_hist = []
     obs, _ = sim.reset()
@@ -139,27 +143,50 @@ def run_simulation(
         obs, reward, terminated, truncated, info = sim.step(dn_drive)
         if terminated or truncated:
             break
-        rendered_img = sim.render()[0]
+        rendered_imgs = sim.render()
+        rendered_img = rendered_imgs[0]
         if rendered_img is not None:
-            add_icon_to_image(rendered_img, icons[walking_state])
+            add_icon_to_image(rendered_img, icons[walking_state], first_text_pos)
+            # cut the debug string in half
+            debug_str_first, debug_second_str = debug_str.split(" ", 1)
+            debug_second_str = debug_second_str[1:]
             cv2.putText(
                 rendered_img,
-                debug_str,
-                (20, cam.window_size[1] - 30),
+                debug_str_first,
+                first_text_pos,
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 0, 0),
                 1,
                 cv2.LINE_AA,
             )
-            # add the past trajectory
-            cv2.polylines(
+            cv2.putText(
                 rendered_img,
-                [np.array(obs_hist)[:, 0, :2].astype(np.int32)],
-                isClosed=False,
-                color=(0, 255, 0),
-                thickness=1,
+                debug_second_str,
+                second_test_pos,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 0),
+                1,
+                cv2.LINE_AA,
             )
+
+            # add past trajectory
+            # project to the camera coordinates
+            fly_pos.append(obs["fly"][0][:2])
+
+            rendered_img = draw_past_trajectory(rendered_img,
+                                                 sim, np.array(fly_pos), cam)
+            
+            # resample the rendered image
+            rendered_img = cv2.resize(rendered_img, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST)
+            # add the other camera view in the bottom right
+            zoom_in_img = rendered_imgs[1]
+            # add border to the zoom in image
+            zoom_in_img = cv2.copyMakeBorder(zoom_in_img, 5, 5, 5, 5, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            rendered_img[-zoom_in_img.shape[0]:, -zoom_in_img.shape[1]:] = zoom_in_img
+            
+            sim.cameras[0]._frames[-1] = rendered_img
 
             # if obs["odor_intensity"].max() > encounter_threshold:
             #     cv2.putText(
