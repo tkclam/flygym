@@ -152,7 +152,7 @@ def run_simulation(
 
     # Run the simulation
     obs_hist = []
-    obs, _ = sim.reset()
+    obs, _ = sim.reset(seed)
     for i in range(int(run_time / sim.timestep)):
         if i % int(1 / sim.timestep) == 0:
             sec = i * sim.timestep
