@@ -787,7 +787,6 @@ class NeuroMechFly(gym.Env):
             return
 
     def _add_joint_actuators(self, gain):
-
         if self.control == "motor" and not gain is None:
             logging.warning(
                 "Ignoring the provided gain because the control mode is motor."
