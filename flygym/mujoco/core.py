@@ -787,7 +787,7 @@ class NeuroMechFly(gym.Env):
             return
 
     def _add_joint_actuators(self, gain):
-        
+
         if self.control == "motor" and not gain is None:
             logging.warning(
                 "Ignoring the provided gain because the control mode is motor."
@@ -806,7 +806,6 @@ class NeuroMechFly(gym.Env):
                         ctrlrange="-1000000 1000000",
                         forcerange="-inf inf",
                         forcelimited=True,
-                        
                     )
                 )
             elif self.control == "velocity":
@@ -816,7 +815,7 @@ class NeuroMechFly(gym.Env):
                         name=f"actuator_{self.control}_{joint}",
                         joint=joint,
                         kv=gain,
-                        ctrlrange="-1000000 1000000", 
+                        ctrlrange="-1000000 1000000",
                         forcerange="-inf inf",
                         forcelimited=True,
                     )
