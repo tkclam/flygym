@@ -55,7 +55,11 @@ class Parameters:
     non_actuated_joint_damping : float
         Damping coefficient of non-actuated joints, by default 1.0. (made stiff for better stability)
     actuator_kp : float
-        Position gain of the actuators, by default 40.0.
+        If control is "position", this is the proportional gain of the
+        position controller, by default 40.0.
+        If control is "velocity", this is the proportional gain of the
+        velocity controller, by default 40.0.
+        If control is "motor", this argument is ignored.
     tarsus_stiffness : float
         Stiffness of the passive, compliant tarsus joints, by default 10.0.
     tarsus_damping : float
@@ -218,7 +222,7 @@ class NeuroMechFly(gym.Env):
         z), where x, y, z define the rotation around x, y and z in radian.
     control : str
         The joint controller type. Can be "position", "velocity", or
-        "torque".
+        "motor" (torque control).
     init_pose : flygym.state.BaseState
         Which initial pose to start the simulation from.
     render_mode : str
@@ -446,13 +450,8 @@ class NeuroMechFly(gym.Env):
             self._configure_eyes()
             self.retina = vision.Retina()
 
-        # Define list of actuated joints
-        self._actuators = [
-            self.model.find("actuator", f"actuator_{control}_{joint}")
-            for joint in actuated_joints
-        ]
+        self._actuators = self._add_joint_actuators(sim_params.actuator_kp)
 
-        self._set_actuators_gain()
         self._set_geoms_friction()
         self._set_joints_stiffness_and_damping()
         self._set_compliant_tarsus()
@@ -787,9 +786,54 @@ class NeuroMechFly(gym.Env):
                 )
             return
 
-    def _set_actuators_gain(self):
-        for actuator in self._actuators:
-            actuator.kp = self.sim_params.actuator_kp
+    def _add_joint_actuators(self, gain):
+        
+        if self.control == "motor" and not gain is None:
+            logging.warning(
+                "Ignoring the provided gain because the control mode is motor."
+            )
+
+        actuators = []
+
+        for joint in self.actuated_joints:
+            if self.control == "position":
+                actuators.append(
+                    self.model.actuator.add(
+                        self.control,
+                        name=f"actuator_{self.control}_{joint}",
+                        joint=joint,
+                        kp=gain,
+                        ctrlrange="-1000000 1000000",
+                        forcerange="-inf inf",
+                        forcelimited=True,
+                        
+                    )
+                )
+            elif self.control == "velocity":
+                actuators.append(
+                    self.model.actuator.add(
+                        self.control,
+                        name=f"actuator_{self.control}_{joint}",
+                        joint=joint,
+                        kv=gain,
+                        ctrlrange="-1000000 1000000", 
+                        forcerange="-inf inf",
+                        forcelimited=True,
+                    )
+                )
+            elif self.control == "motor":
+                actuators.append(
+                    self.model.actuator.add(
+                        self.control,
+                        name=f"actuator_{self.control}_{joint}",
+                        joint=joint,
+                        ctrlrange="-1000000 1000000",
+                        forcerange="-inf inf",
+                        forcelimited=True,
+                    )
+                )
+
+        return actuators
 
     def _set_geoms_friction(self):
         for geom in self.model.find_all("geom"):
@@ -928,18 +972,8 @@ class NeuroMechFly(gym.Env):
                     ),
                     self.model.sensor.add(
                         "actuatorfrc",
-                        name=f"actuatorfrc_position_{joint}",
-                        actuator=f"actuator_position_{joint}",
-                    ),
-                    self.model.sensor.add(
-                        "actuatorfrc",
-                        name=f"actuatorfrc_velocity_{joint}",
-                        actuator=f"actuator_velocity_{joint}",
-                    ),
-                    self.model.sensor.add(
-                        "actuatorfrc",
-                        name=f"actuatorfrc_motor_{joint}",
-                        actuator=f"actuator_torque_{joint}",
+                        name=f"actuatorfrc_{self.control}_{joint}",
+                        actuator=f"actuator_{self.control}_{joint}",
                     ),
                 ]
             )
@@ -1047,7 +1081,7 @@ class NeuroMechFly(gym.Env):
     def _set_init_pose(self, init_pose: Dict[str, float]):
         with self.physics.reset_context():
             for i in range(len(self.actuated_joints)):
-                curr_joint = self._actuators[i].joint.name
+                curr_joint = self._actuators[i].joint
                 if (curr_joint in self.actuated_joints) and (curr_joint in init_pose):
                     animat_name = f"Animat/{curr_joint}"
                     self.physics.named.data.qpos[animat_name] = init_pose[curr_joint]
@@ -1624,11 +1658,10 @@ class NeuroMechFly(gym.Env):
         joint_obs = np.zeros((3, len(self.actuated_joints)))
         joint_sensordata = self.physics.bind(self._joint_sensors).sensordata
         for i, joint in enumerate(self.actuated_joints):
-            base_idx = i * 5
+            base_idx = i * 3
             # pos and vel
-            joint_obs[:2, i] = joint_sensordata[base_idx : base_idx + 2]
-            # torque from pos/vel/motor actuators
-            joint_obs[2, i] = joint_sensordata[base_idx + 2 : base_idx + 5].sum()
+            joint_obs[:3, i] = joint_sensordata[base_idx : base_idx + 3]
+
         joint_obs[2, :] *= 1e-9  # convert to N
 
         # fly position and orientation
