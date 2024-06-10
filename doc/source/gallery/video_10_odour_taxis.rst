@@ -1,5 +1,5 @@
 Odour Taxis
-=======
+===========
 Our simulated fly, walks toward an attractive odour source (in orange) while avoiding two aversive odours sources (in blue).
 
 .. raw:: html

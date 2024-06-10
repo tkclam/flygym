@@ -1,5 +1,5 @@
 Visual taxis
-=======
+============
 NeuroMechFly walks toward a ball using simulated vision.
 
 .. raw:: html

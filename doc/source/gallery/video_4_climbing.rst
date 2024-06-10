@@ -1,5 +1,5 @@
 Climbing
-=======
+========
 Using adhesion our simulated fly is able to progress on an angled surface.
 
 .. raw:: html
